@@ -95,7 +95,7 @@ export default function ViewerTransactionTable({
   )
   if (transactions.length === 0) {
     return (
-      <div className="bg-white border border-emerald-100 rounded-lg p-8 text-center">
+      <div className="bg-white border border-emerald-100 rounded-xl p-8 text-center">
         <p className="text-gray-600">
           No transactions available. Select a data entry user to view their transactions.
         </p>
@@ -104,7 +104,7 @@ export default function ViewerTransactionTable({
   }
 
   return (
-    <div className="bg-white border border-emerald-100 rounded-lg overflow-hidden shadow-sm">
+    <div className="bg-white border border-emerald-100 rounded-xl overflow-hidden shadow-sm">
       <div className="overflow-auto min-h-[450px] max-h-[600px] pb-[200px]">
         <table className="w-full">
           <thead>

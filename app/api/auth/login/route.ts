@@ -1,11 +1,9 @@
-import { getDb, initDb } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { compare } from 'bcryptjs'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    await initDb()
-    const db = await getDb()
     const { email, password } = await request.json()
 
     if (!email || !password) {
@@ -15,9 +13,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const user = await db.get('SELECT * FROM users WHERE email = ?', [email])
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single()
 
-    if (!user) {
+    if (error || !user) {
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }

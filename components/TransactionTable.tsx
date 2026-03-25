@@ -12,6 +12,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 
 type Transaction = {
   id: string
@@ -50,6 +61,7 @@ export default function TransactionTable({ transactions, onTransactionDeleted, o
   const [isDeleting, setIsDeleting] = useState(false)
   const [editFormData, setEditFormData] = useState<Partial<Transaction> | null>(null)
   const [isCustomBank, setIsCustomBank] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   const standardBanks = [
     'DBP',
@@ -134,17 +146,16 @@ export default function TransactionTable({ transactions, onTransactionDeleted, o
       const updatedTx = await response.json()
       setSelectedTransaction(updatedTx)
       setEditFormData(null)
+      toast.success("Transaction updated successfully")
       onTransactionUpdated?.()
     } catch (error) {
       console.error('Error updating transaction:', error)
-      alert(`Error updating transaction: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Error updating transaction: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
   const handleDelete = async () => {
     if (!selectedTransaction) return
-
-    if (!confirm('Are you sure you want to delete this transaction?')) return
 
     setIsDeleting(true)
     try {
@@ -157,14 +168,16 @@ export default function TransactionTable({ transactions, onTransactionDeleted, o
         throw new Error(data.error || 'Failed to delete transaction')
       }
 
+      toast.success("Transaction deleted successfully")
       setSelectedTransaction(null)
       setIsEditing(false)
       onTransactionDeleted?.()
     } catch (error) {
       console.error('Error deleting transaction:', error)
-      alert(`Error deleting transaction: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast.error(`Error deleting transaction: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsDeleting(false)
+      setShowDeleteDialog(false)
     }
   }
 
@@ -191,7 +204,7 @@ export default function TransactionTable({ transactions, onTransactionDeleted, o
   return (
     <div className="flex gap-6 h-full">
       {/* Table */}
-      <div className="flex-1 bg-white border border-emerald-100 rounded-lg overflow-hidden shadow-sm">
+      <div className="flex-1 bg-white border border-emerald-100 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-auto min-h-[450px] max-h-[600px] pb-[200px]">
           <table className="w-full">
             <thead>
@@ -696,7 +709,7 @@ export default function TransactionTable({ transactions, onTransactionDeleted, o
                   Update
                 </Button>
                 <Button
-                  onClick={handleDelete}
+                  onClick={() => setShowDeleteDialog(true)}
                   disabled={isDeleting}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold h-11 gap-2"
                 >
@@ -709,6 +722,31 @@ export default function TransactionTable({ transactions, onTransactionDeleted, o
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the transaction
+              from the records.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleDelete()
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -55,7 +55,7 @@ export default function EntryDashboard() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([])
   const [showForm, setShowForm] = useState(false)
-  const [logo, setLogo] = useState<string | null>(null)
+  const [logo, setLogo] = useState<string | null>('/logos/logo3.jpg')
   const [isLoading, setIsLoading] = useState(true)
   const [bankNames, setBankNames] = useState<string[]>([])
   const [selectedBankName, setSelectedBankName] = useState<string>('')
@@ -261,7 +261,7 @@ export default function EntryDashboard() {
                 <MonthYearPicker
                   value={selectedDate}
                   onChange={setSelectedDate}
-                  className="w-full rounded-lg border-emerald-200 bg-white px-4 py-2 text-gray-900 focus-visible:ring-2 focus-visible:ring-emerald-600 font-normal"
+                  className="w-full rounded-xl border-emerald-200 bg-white px-4 py-2 text-gray-900 focus-visible:ring-2 focus-visible:ring-emerald-600 font-normal"
                 />
               </div>
               <div>

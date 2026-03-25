@@ -193,7 +193,7 @@ export default function BatchList({ viewerId, onSelectBatch }: BatchListProps) {
   return (
     <div>
       {/* Filters */}
-      <div className="bg-white border border-emerald-100 rounded-lg p-6 mb-6">
+      <div className="bg-white border border-emerald-100 rounded-xl p-6 mb-6">
         <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-700">Fund</label>

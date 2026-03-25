@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint .",
     "db:init": "node scripts/init-db.js",
-    "db:seed": "npm run db:init && node scripts/seed.js"
+    "db:seed": "npm run db:init && node scripts/seed.js",
+    "db:seed:supabase": "node scripts/seed-supabase.js",
+    "migrate:supabase": "node scripts/migrate-sqlite-to-supabase.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -39,6 +41,7 @@
     "@radix-ui/react-toggle": "1.1.10",
     "@radix-ui/react-toggle-group": "1.1.11",
     "@radix-ui/react-tooltip": "1.2.8",
+    "@supabase/supabase-js": "^2.100.0",
     "@vercel/analytics": "1.6.1",
     "autoprefixer": "^10.4.20",
     "bcryptjs": "^2.4.3",
@@ -46,6 +49,7 @@
     "clsx": "^2.1.1",
     "cmdk": "1.1.1",
     "date-fns": "4.1.0",
+    "dotenv": "^17.3.1",
     "embla-carousel-react": "8.6.0",
     "input-otp": "1.4.2",
     "lucide-react": "^0.564.0",

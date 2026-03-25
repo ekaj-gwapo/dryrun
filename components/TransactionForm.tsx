@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select"
 import { DatePicker } from '@/components/DatePicker'
 import { AlertCircle } from 'lucide-react'
+import { toast } from "sonner"
 
 type TransactionFormProps = {
   userId: string;
@@ -142,7 +143,8 @@ export default function TransactionForm({ userId, existingBankNames = [], onSucc
         moph_location: '',
         responsibility_center: '',
       })
-
+      
+      toast.success("Transaction created successfully!")
       onSuccess?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')

@@ -1,5 +1,17 @@
-import { getDb, initDb } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { NextRequest, NextResponse } from 'next/server'
+
+// Helper to map database columns to camelCase
+const mapBatch = (b: any) => ({
+  id: b.id,
+  viewerId: b.viewerid,
+  entryUserId: b.entryuserid,
+  batchName: b.batchname,
+  transactionCount: b.transactioncount,
+  totalAmount: b.totalamount,
+  appliedFilters: b.appliedfilters,
+  createdAt: b.createdat
+})
 
 // GET batch details with transactions
 export async function GET(
@@ -7,17 +19,16 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await initDb()
-    const db = await getDb()
     const { id: batchId } = await params
 
     // Get batch metadata
-    const batch = await db.get(
-      'SELECT * FROM transaction_batches WHERE id = ?',
-      [batchId]
-    )
+    const { data: batch, error: batchError } = await supabase
+      .from('transaction_batches')
+      .select('*')
+      .eq('id', batchId)
+      .single()
 
-    if (!batch) {
+    if (batchError || !batch) {
       return NextResponse.json(
         { error: 'Batch not found' },
         { status: 404 }
@@ -25,17 +36,17 @@ export async function GET(
     }
 
     // Get batch transactions
-    const batchTransactions = await db.all(
-      `SELECT id, transactionId, transactionData, createdAt 
-       FROM batch_transactions 
-       WHERE batchId = ? 
-       ORDER BY createdAt DESC`,
-      [batchId]
-    )
+    const { data: batchTransactions, error: txError } = await supabase
+      .from('batch_transactions')
+      .select('*')
+      .eq('batchid', batchId)
+      .order('createdat', { ascending: false })
+
+    if (txError) throw txError
 
     // Parse transaction data
     const transactions = batchTransactions.map((bt: any) => ({
-      ...JSON.parse(bt.transactionData),
+      ...(typeof bt.transactiondata === 'string' ? JSON.parse(bt.transactiondata) : bt.transactiondata),
       batchTransactionId: bt.id,
     }))
 
@@ -55,8 +66,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await initDb()
-    const db = await getDb()
     const { id: batchId } = await params
     const body = await request.json()
 
@@ -70,14 +79,13 @@ export async function POST(
     }
 
     // Get the batch transactions data using batch_transactions IDs
-    const placeholders = transactionIds.map(() => '?').join(',')
-    const batchTxs = await db.all(
-      `SELECT id, transactionData FROM batch_transactions 
-       WHERE batchId = ? AND id IN (${placeholders})`,
-      [batchId, ...transactionIds]
-    )
+    const { data: batchTxs, error: fetchError } = await supabase
+      .from('batch_transactions')
+      .select('id, transactiondata')
+      .eq('batchid', batchId)
+      .in('id', transactionIds)
 
-    if (batchTxs.length === 0) {
+    if (fetchError || !batchTxs || batchTxs.length === 0) {
       return NextResponse.json(
         { error: 'No transactions found in batch' },
         { status: 404 }
@@ -86,102 +94,100 @@ export async function POST(
 
     // Restore transactions back to main transactions table
     const restoredTransactions = []
-    const batchTxIds = []
+    const batchTxIdsToExclude = []
     const failedTransactions = []
 
     for (const batchTx of batchTxs) {
-      const txData = JSON.parse(batchTx.transactionData)
+      const txData = typeof batchTx.transactiondata === 'string' ? JSON.parse(batchTx.transactiondata) : batchTx.transactiondata
 
       try {
         console.log('[v0] Restoring transaction:', txData.id)
         
         // Delete first to ensure no duplicates
-        await db.run(
-          `DELETE FROM transactions WHERE id = ?`,
-          [txData.id]
-        )
+        await supabase.from('transactions').delete().eq('id', txData.id)
 
         // Then re-insert the transaction
-        await db.run(
-          `INSERT INTO transactions (id, userId, bankName, payee, address, dvNumber, particulars, amount, date, checkNumber, controlNumber, accountCode, debit, credit, remarks, fund, responsibilityCenter, moph, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            txData.id,
-            txData.userId,
-            txData.bankName,
-            txData.payee,
-            txData.address,
-            txData.dvNumber,
-            txData.particulars,
-            txData.amount,
-            txData.date,
-            txData.checkNumber,
-            txData.controlNumber,
-            txData.accountCode,
-            txData.debit,
-            txData.credit,
-            txData.remarks,
-            txData.fund,
-            txData.responsibilityCenter,
-            txData.moph || '',
-            txData.createdAt,
-          ]
-        )
+        const { error: insertError } = await supabase
+          .from('transactions')
+          .insert([
+            {
+              id: txData.id,
+              userid: txData.userId,
+              bankname: txData.bankName,
+              payee: txData.payee,
+              address: txData.address,
+              dvnumber: txData.dvNumber,
+              particulars: txData.particulars,
+              amount: txData.amount,
+              date: txData.date,
+              checknumber: txData.checkNumber,
+              controlnumber: txData.controlNumber,
+              accountcode: txData.accountCode,
+              debit: txData.debit,
+              credit: txData.credit,
+              remarks: txData.remarks,
+              fund: txData.fund,
+              responsibilitycenter: txData.responsibilityCenter,
+              moph: txData.moph || '',
+              createdat: txData.createdAt,
+            }
+          ])
+
+        if (insertError) throw insertError
 
         console.log('[v0] Successfully restored transaction:', txData.id)
         restoredTransactions.push(txData)
-        batchTxIds.push(batchTx.id)
+        batchTxIdsToExclude.push(batchTx.id)
       } catch (txError: any) {
         console.error(`[v0] Error restoring transaction ${txData.id}:`, txError.message)
         failedTransactions.push({
           id: txData.id,
           error: txError.message
         })
-        // Continue with other transactions even if one fails
         continue
       }
     }
 
-    // If no transactions were restored, return error
     if (restoredTransactions.length === 0) {
       return NextResponse.json(
         { 
-          error: `Failed to restore transactions. Failed transactions: ${failedTransactions.map(t => t.id).join(', ')}`,
+          error: `Failed to restore transactions.`,
           failedTransactions
         },
         { status: 400 }
       )
     }
 
-    // Remove restored transactions from batch_transactions table using batch_transactions IDs
     let batchWasDeleted = false
     
-    if (batchTxIds.length > 0) {
-      const placeholders = batchTxIds.map(() => '?').join(',')
-      await db.run(
-        `DELETE FROM batch_transactions WHERE id IN (${placeholders})`,
-        [...batchTxIds]
-      )
+    if (batchTxIdsToExclude.length > 0) {
+      // Remove restored transactions from batch_transactions table
+      await supabase.from('batch_transactions').delete().in('id', batchTxIdsToExclude)
 
       // Update batch count and amount
-      const updatedBatch = await db.get(
-        `SELECT COUNT(*) as count, COALESCE(SUM(CAST(json_extract(transactionData, '$.amount') AS REAL)), 0) as total 
-         FROM batch_transactions WHERE batchId = ?`,
-        [batchId]
-      )
+      const { data: remainingTxs, error: remainingError } = await supabase
+        .from('batch_transactions')
+        .select('transactiondata')
+        .eq('batchid', batchId)
 
-      // If batch has 0 transactions, delete it
-      if (updatedBatch.count === 0) {
-        await db.run(
-          `DELETE FROM transaction_batches WHERE id = ?`,
-          [batchId]
-        )
+      if (remainingError) throw remainingError
+
+      if (!remainingTxs || remainingTxs.length === 0) {
+        await supabase.from('transaction_batches').delete().eq('id', batchId)
         batchWasDeleted = true
       } else {
-        await db.run(
-          `UPDATE transaction_batches SET transactionCount = ?, totalAmount = ? WHERE id = ?`,
-          [updatedBatch.count, updatedBatch.total, batchId]
-        )
+        const totalAmount = remainingTxs.reduce((sum, bt) => {
+          const data = typeof bt.transactiondata === 'string' ? JSON.parse(bt.transactiondata) : bt.transactiondata
+          return sum + (data.amount || 0)
+        }, 0)
+
+        await supabase
+          .from('transaction_batches')
+          .update({
+            transactioncount: remainingTxs.length,
+            totalamount: totalAmount,
+          })
+          .eq('id', batchId)
       }
     }
 
@@ -206,48 +212,59 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await initDb()
-    const db = await getDb()
     const { id: batchId } = await params
 
     // Get ALL transactions in this batch
-    const batchTxs = await db.all(
-      `SELECT id, transactionData FROM batch_transactions WHERE batchId = ?`,
-      [batchId]
-    )
+    const { data: batchTxs, error: fetchError } = await supabase
+      .from('batch_transactions')
+      .select('id, transactiondata')
+      .eq('batchid', batchId)
 
-    if (batchTxs.length === 0) {
-      // Just delete the empty batch
-      await db.run(`DELETE FROM transaction_batches WHERE id = ?`, [batchId])
+    if (fetchError) throw fetchError
+
+    if (!batchTxs || batchTxs.length === 0) {
+      await supabase.from('transaction_batches').delete().eq('id', batchId)
       return NextResponse.json({ success: true, message: 'Empty batch deleted' })
     }
 
     // Restore transactions back to main transactions table
     for (const batchTx of batchTxs) {
-      const txData = JSON.parse(batchTx.transactionData)
+      const txData = typeof batchTx.transactiondata === 'string' ? JSON.parse(batchTx.transactiondata) : batchTx.transactiondata
       try {
-        await db.run(
-          `DELETE FROM transactions WHERE id = ?`,
-          [txData.id]
-        )
-        await db.run(
-          `INSERT INTO transactions (id, userId, bankName, payee, address, dvNumber, particulars, amount, date, checkNumber, controlNumber, accountCode, debit, credit, remarks, fund, responsibilityCenter, moph, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            txData.id, txData.userId, txData.bankName, txData.payee, txData.address, txData.dvNumber,
-            txData.particulars, txData.amount, txData.date, txData.checkNumber, txData.controlNumber,
-            txData.accountCode, txData.debit, txData.credit, txData.remarks, txData.fund,
-            txData.responsibilityCenter, txData.moph || '', txData.createdAt,
-          ]
-        )
+        await supabase.from('transactions').delete().eq('id', txData.id)
+        await supabase
+          .from('transactions')
+          .insert([
+            {
+              id: txData.id,
+              userid: txData.userId,
+              bankname: txData.bankName,
+              payee: txData.payee,
+              address: txData.address,
+              dvnumber: txData.dvNumber,
+              particulars: txData.particulars,
+              amount: txData.amount,
+              date: txData.date,
+              checknumber: txData.checkNumber,
+              controlnumber: txData.controlNumber,
+              accountcode: txData.accountCode,
+              debit: txData.debit,
+              credit: txData.credit,
+              remarks: txData.remarks,
+              fund: txData.fund,
+              responsibilitycenter: txData.responsibilityCenter,
+              moph: txData.moph || '',
+              createdat: txData.createdAt,
+            }
+          ])
       } catch (e: any) {
         console.error('Error restoring transaction', e.message)
       }
     }
 
     // Delete from batch_transactions and transaction_batches
-    await db.run(`DELETE FROM batch_transactions WHERE batchId = ?`, [batchId])
-    await db.run(`DELETE FROM transaction_batches WHERE id = ?`, [batchId])
+    await supabase.from('batch_transactions').delete().eq('batchid', batchId)
+    await supabase.from('transaction_batches').delete().eq('id', batchId)
 
     return NextResponse.json({ success: true, message: 'Batch deleted and transactions restored' })
   } catch (error) {
@@ -258,4 +275,3 @@ export async function DELETE(
     )
   }
 }
-

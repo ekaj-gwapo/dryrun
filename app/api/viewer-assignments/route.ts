@@ -1,12 +1,18 @@
-import { getDb, initDb } from '@/lib/db'
+import { supabase } from '@/lib/supabase'
 import { NextRequest, NextResponse } from 'next/server'
-import { randomUUID } from 'crypto'
+
+// Helper to map database columns to camelCase
+const mapAssignment = (a: any) => ({
+  id: a.id,
+  viewerId: a.viewerid,
+  entryUserId: a.entryuserid,
+  createdAt: a.createdat,
+  email: a.users?.email
+})
 
 // GET viewer's assigned entry users
 export async function GET(request: NextRequest) {
   try {
-    await initDb()
-    const db = await getDb()
     const viewerId = request.nextUrl.searchParams.get('viewerId')
 
     if (!viewerId) {
@@ -16,14 +22,19 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const assignments = await db.all(
-      `SELECT va.*, u.email FROM viewer_access va
-       LEFT JOIN users u ON va.entryUserId = u.id
-       WHERE va.viewerId = ?`,
-      [viewerId]
-    )
+    const { data: assignments, error } = await supabase
+      .from('viewer_access')
+      .select(`
+        *,
+        users!viewer_access_entryuserid_fkey (
+          email
+        )
+      `)
+      .eq('viewerid', viewerId)
 
-    return NextResponse.json(assignments)
+    if (error) throw error
+
+    return NextResponse.json(assignments?.map(mapAssignment) || [])
   } catch (error) {
     console.error('Error fetching assignments:', error)
     return NextResponse.json(
@@ -36,8 +47,6 @@ export async function GET(request: NextRequest) {
 // POST new viewer assignment
 export async function POST(request: NextRequest) {
   try {
-    await initDb()
-    const db = await getDb()
     const body = await request.json()
     const { viewerId, entryUserId } = body
 
@@ -48,25 +57,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const id = randomUUID()
-    
-    try {
-      await db.run(
-        'INSERT INTO viewer_access (id, viewerId, entryUserId) VALUES (?, ?, ?)',
-        [id, viewerId, entryUserId]
-      )
-    } catch (err: any) {
-      if (err.message.includes('UNIQUE')) {
+    const { data: assignment, error } = await supabase
+      .from('viewer_access')
+      .insert([{ viewerid: viewerId, entryuserid: entryUserId }])
+      .select('*')
+      .single()
+
+    if (error) {
+      if (error.code === '23505') { // Postgres code for duplicate key
         return NextResponse.json(
           { error: 'Assignment already exists' },
           { status: 400 }
         )
       }
-      throw err
+      throw error
     }
 
-    const assignment = await db.get('SELECT * FROM viewer_access WHERE id = ?', [id])
-    return NextResponse.json(assignment, { status: 201 })
+    return NextResponse.json(mapAssignment(assignment), { status: 201 })
   } catch (error) {
     console.error('Error creating assignment:', error)
     return NextResponse.json(
@@ -79,8 +86,6 @@ export async function POST(request: NextRequest) {
 // DELETE viewer assignment
 export async function DELETE(request: NextRequest) {
   try {
-    await initDb()
-    const db = await getDb()
     const id = request.nextUrl.searchParams.get('id')
 
     if (!id) {
@@ -90,7 +95,13 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    await db.run('DELETE FROM viewer_access WHERE id = ?', [id])
+    const { error } = await supabase
+      .from('viewer_access')
+      .delete()
+      .eq('id', id)
+
+    if (error) throw error
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting assignment:', error)

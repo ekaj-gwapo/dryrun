@@ -16,6 +16,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 import { MonthYearPicker } from '@/components/MonthYearPicker'
 import { LogOut, ChevronDown, Settings, Printer, Archive, Search, Upload } from 'lucide-react'
 import Link from 'next/link'
@@ -63,6 +74,8 @@ export default function ViewerDashboard() {
   const [isImporting, setIsImporting] = useState(false)
   const printRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false)
+  const [pendingBatch, setPendingBatch] = useState<any>(null)
   const router = useRouter()
 
   const fundOptions = [
@@ -217,14 +230,14 @@ export default function ViewerDashboard() {
         if (firstFail.amount <= 0) missing.push("Amount (>0)");
         if (!firstFail.accountCode) missing.push("Account Code");
         
-        alert(`No valid transactions. Checked row ${firstFail._rawIndex}. Missing/invalid fields: ${missing.join(', ')}. Please check the console for more details.`);
+        toast.error(`Invalid Excel data. Missing/invalid fields: ${missing.join(', ')}. Please check the console.`);
         setIsImporting(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
         return
       }
 
       if (validTransactions.length === 0) {
-        alert("No data found in the Excel file.")
+        toast.error("No data found in the Excel file.");
         setIsImporting(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
         return
@@ -234,7 +247,7 @@ export default function ViewerDashboard() {
       const finalTransactions = validTransactions.map(({ _rawIndex, _rawRow, ...tx }) => tx);
 
       if (!selectedEntryUser) {
-         alert("No entry user selected to assign imports to.")
+         toast.error("No entry user selected to assign imports to.");
          setIsImporting(false)
          if (fileInputRef.current) fileInputRef.current.value = ''
          return
@@ -254,14 +267,14 @@ export default function ViewerDashboard() {
       }
       
       const result = await response.json()
-      alert(result.message || `Successfully imported ${finalTransactions.length} transactions!`)
+      toast.success(result.message || `Successfully imported ${finalTransactions.length} transactions!`)
       
       // Refresh transactions
       await fetchTransactions(selectedEntryUser)
       
     } catch (error) {
       console.error('Error importing Excel:', error)
-      alert('Failed to import file. Make sure it is a valid Excel file with the correct headers.')
+      toast.error('Failed to import file. Make sure it is a valid Excel file with the correct headers.')
     } finally {
       setIsImporting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -322,7 +335,7 @@ export default function ViewerDashboard() {
 
   const createBatchAndPrint = async () => {
     if (!user || !selectedEntryUser || transactions.length === 0) {
-      alert('No transactions to print')
+      toast.error('No transactions to print')
       return
     }
 
@@ -355,43 +368,48 @@ export default function ViewerDashboard() {
 
       const batch = await batchResponse.json()
       setBatchId(batch.id)
+      
+      // Store batch info for confirmation
+      setPendingBatch(batch)
 
-      // Show success message
-      const msg = `Batch created successfully! ID: ${batch.id.slice(0, 8)}`
-      alert(msg)
+      toast.success(`Batch created successfully! ID: ${batch.id.slice(0, 8)}`)
 
-      // Open print dialog and ONLY refresh state after a delay or dialog close
-      setTimeout(async () => {
+      // Print immediately
+      setTimeout(() => {
         window.print()
-        
-        // Ask the user if the print was successful
-        const confirmed = confirm("Did the document print successfully?\n\nClick OK to confirm batch creation.\nClick Cancel to undo this batch and restore the transactions.")
-        
-        if (confirmed) {
-          // Refresh transactions to remove printed ones AFTER printing
-          await fetchTransactions(selectedEntryUser)
-        } else {
-          // Undo batch creation
-          try {
-            setIsCreatingBatch(true)
-            await fetch(`/api/batches/${batch.id}`, { method: 'DELETE' })
-            setBatchId(null)
-            alert("Batch creation has been undone. Transactions are restored to the list.")
-          } catch (error) {
-            console.error('Error undoing batch:', error)
-            alert('Failed to undo batch creation.')
-          } finally {
-            setIsCreatingBatch(false)
-            await fetchTransactions(selectedEntryUser)
-          }
-        }
+        // Show confirmation modal AFTER print dialog is dismissed
+        setShowBatchConfirm(true)
       }, 500)
     } catch (error) {
       console.error('Error creating batch:', error)
-      alert('Failed to create batch. Please try again.')
+      toast.error('Failed to create batch. Please try again.')
     } finally {
       setIsCreatingBatch(false)
     }
+  }
+
+  const confirmBatch = async (success: boolean) => {
+    if (!pendingBatch) return
+
+    if (success) {
+      toast.success("Batch confirmed successfully.")
+      await fetchTransactions(selectedEntryUser!)
+    } else {
+      try {
+        setIsCreatingBatch(true)
+        await fetch(`/api/batches/${pendingBatch.id}`, { method: 'DELETE' })
+        setBatchId(null)
+        toast.info("Batch creation undone. Transactions restored.")
+        await fetchTransactions(selectedEntryUser!)
+      } catch (error) {
+        console.error('Error undoing batch:', error)
+        toast.error('Failed to undo batch creation.')
+      } finally {
+        setIsCreatingBatch(false)
+      }
+    }
+    setPendingBatch(null)
+    setShowBatchConfirm(false)
   }
 
   if (isLoading) {
@@ -410,9 +428,12 @@ export default function ViewerDashboard() {
       {/* Header - Hidden on Print */}
       <div className="bg-white border-b border-emerald-100 sticky top-0 z-40 print:hidden">
         <div className="w-full px-6 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-emerald-900">Viewer Dashboard</h1>
-            <p className="text-sm text-gray-600">{user?.email}</p>
+          <div className="flex items-center gap-4">
+            <img src="/logos/logo3.jpg" alt="Logo" className="h-10 w-10 object-contain" />
+            <div>
+              <h1 className="text-2xl font-bold text-emerald-900">Viewer Dashboard</h1>
+              <p className="text-sm text-gray-600">{user?.email}</p>
+            </div>
           </div>
           <div className="flex gap-2">
             <Button
@@ -432,7 +453,7 @@ export default function ViewerDashboard() {
 
 
         {/* Filters and Actions */}
-        <div className="bg-white rounded-lg p-6 mb-8 border border-emerald-100 shadow-md">
+        <div className="bg-white rounded-xl p-6 mb-8 border border-emerald-100 shadow-md">
           <div className="flex justify-between items-center mb-4">
              <div className="flex gap-2">
                 <input 
@@ -619,6 +640,33 @@ export default function ViewerDashboard() {
           bankName={selectedBankName}
         />
       </div>
+
+      {/* Batch Print Confirmation Modal */}
+      <AlertDialog open={showBatchConfirm} onOpenChange={setShowBatchConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Did the report print successfully?</AlertDialogTitle>
+            <AlertDialogDescription>
+              If the print was successful, clicking Confirm will finalize the batch. 
+              Clicking Undo will restore the transactions for re-printing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogAction 
+              onClick={() => confirmBatch(true)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              Print Successful (Confirm)
+            </AlertDialogAction>
+            <AlertDialogCancel 
+              onClick={() => confirmBatch(false)}
+              className="bg-red-50 text-red-600 border-red-200 hover:bg-red-100 mt-0"
+            >
+              Print Failed (Undo)
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
